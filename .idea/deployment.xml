@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="shower_separation">
+    <serverData>
+      <paths name="shower_separation">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/mnt/belavin/Electromagnetic_showers_reconstruction" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>

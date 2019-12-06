@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="278a27d9-0063-4494-9632-a35fcdd39edc" name="shower_separation" url="http://13.85.29.208">
+        <fileTransfer host="13.85.29.208" port="22" privateKey="$PROJECT_DIR$/../.ssh/id_rsa.dms" accessType="SFTP" keyPair="true">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+          <option name="port" value="22" />
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
