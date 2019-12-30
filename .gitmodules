@@ -1,0 +1,6 @@
+[submodule "hgcn"]
+	path = hgcn
+	url = git@github.com:SchattenGenie/hgcn.git
+[submodule "tools"]
+	path = tools
+	url = git@gitlab.com:SchattenGenie/opera_tools.git
