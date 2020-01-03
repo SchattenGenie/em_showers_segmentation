@@ -29,11 +29,13 @@ def add_new_features(shower):
     feat_3 = (data[:, 1] / (data[:, 2] + 0.00001)).view(shape_0, 1)
     feat_4 = (torch.sin(feat_0) + torch.cos(feat_0)) / (feat_0 + 0.00001)
     shower.x = torch.cat([data, feat_0, feat_1, feat_2, feat_3, feat_4], dim=1)
+    shower.x = shower.x / (torch.tensor([10, 10, 10, 1, 1, 1, 100, 100, 100, 1e5]).float())
 
 
 def preprocess_dataset(datafile):
-    showers = list(torch.load(datafile))
+    showers = list(torch.load(datafile))[:2]
     for i in range(len(showers)):
-        showers[i].mask = torch.tensor(create_mask(showers[i])).bool()
+        showers[i].orders = torch.tensor(create_mask(showers[i])).bool()
         add_new_features(showers[i])
+        print(len(showers[i].x), showers[i].edge_index.shape[1])
     return showers
