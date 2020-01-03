@@ -14,6 +14,7 @@ from preprocessing import preprocess_dataset
 from viz_utils import RunningAverageMeter, plot_aucs
 from hgcn import manifolds
 from tqdm import tqdm
+import classification_losses
 import sys
 
 
@@ -85,7 +86,7 @@ def main(
 
         edge_classifier = str_to_class(edge_classifier)(
             manifold=manifold,
-            input_dim=gcn_dim + edge_dim
+            input_dim=2 * gcn_dim + edge_dim
         ).to(device)
         optimizer = RiemannianAdam(
             list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
@@ -99,14 +100,14 @@ def main(
             num_layers=num_layers
         ).to(device)
         edge_classifier = str_to_class(edge_classifier)(
-            input_dim=output_dim + edge_dim
+            input_dim=2 * gcn_dim + edge_dim
         ).to(device)
         optimizer = torch.optim.Adam(
             list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
             lr=learning_rate  # , stabilize=True
         )
-    criterion = nn.BCELoss()
-
+    # criterion = nn.BCELoss()
+    criterion = classification_losses.FocalLoss(gamma=2.)
     # torch.optim.Adam
     loss_train = RunningAverageMeter()
     loss_test = RunningAverageMeter()
@@ -150,6 +151,7 @@ def main(
             acc_test.update(acc)
             roc_auc_test.update(roc_auc)
             pr_auc_test.update(pr_auc)
+            print(loss.item(), roc_auc, pr_auc)
             class_disbalance.update((edge_labels_true.sum().float() / len(edge_labels_true)).item())
 
 

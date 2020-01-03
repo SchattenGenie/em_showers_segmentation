@@ -106,7 +106,7 @@ class EdgeDenseClassifier(nn.Module):
 
 class EdgeDenseClassifierEdgeAttribute(nn.Module):
     def __init__(self, input_dim=10, **kwargs):
-        super(EdgeDenseCl, self).__init__()
+        super(EdgeDenseClassifierEdgeAttribute, self).__init__()
         self.edge_classifier = nn.Sequential(
             nn.Linear(input_dim, 8),
             nn.Tanh(),
@@ -116,5 +116,5 @@ class EdgeDenseClassifierEdgeAttribute(nn.Module):
 
     def forward(self, shower, embeddings, edge_index):
         x = torch.cat([embeddings[edge_index[0]], embeddings[edge_index[0]]], 1)
-        x = torch.cat([x, shower.edge_attr])
+        x = torch.cat([x, shower.edge_attr], 1)
         return self.edge_classifier(x)
