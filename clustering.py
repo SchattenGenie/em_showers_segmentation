@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, roc_curve, precision_recall_curve, accuracy_score, average_precision_score
 from torch_geometric.data import DataLoader
 from preprocessing import preprocess_dataset
-from utils import RunningAverageMeter, plot_aucs
+from viz_utils import RunningAverageMeter, plot_aucs
 from tqdm import tqdm
 import networkx as nx
 from hdbscan import run_hdbscan_on_brick, run_hdbscan
