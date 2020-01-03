@@ -5,11 +5,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 from nets import *
+from hgcn.models.hgcn_nets import HGCN, HGCNResidual, HGCNResidualEmulsionConv
+from hgcn.optimizers import RiemannianAdam
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, roc_curve, precision_recall_curve, accuracy_score, average_precision_score
 from torch_geometric.data import DataLoader
 from preprocessing import preprocess_dataset
-from utils import RunningAverageMeter, plot_aucs
+from viz_utils import RunningAverageMeter, plot_aucs
+from hgcn import manifolds
 from tqdm import tqdm
 import sys
 
@@ -28,13 +31,8 @@ def predict_one_shower(shower, graph_embedder, edge_classifier):
     # TODO: batch training
     embeddings = graph_embedder(shower)
     edge_labels_true = (shower.y[shower.edge_index[0]] == shower.y[shower.edge_index[1]]).view(-1)
-    edge_data = torch.cat([
-        embeddings[shower.edge_index[0]],
-        embeddings[shower.edge_index[1]]
-    ], dim=1)
-    edge_labels_predicted = edge_classifier(edge_data).view(-1)
-
-    return edge_labels_true, edge_labels_predicted
+    edge_labels_predicted = edge_classifier(shower=shower, embeddings=embeddings, edge_index=shower.edge_index).view(-1)
+    return edge_labels_true, torch.clamp(2 * edge_labels_predicted, 1e-6, 1 - 1e-6)
 
 
 @click.command()
@@ -43,22 +41,28 @@ def predict_one_shower(shower, graph_embedder, edge_classifier):
 @click.option('--work_space', type=str, prompt='Enter workspace name')
 @click.option('--epochs', type=int, default=1000)
 @click.option('--learning_rate', type=float, default=1e-3)
-@click.option('--dim_out', type=int, default=144)
+@click.option('--gcn_dim', type=int, default=12)
+@click.option('--hidden_dim', type=int, default=12)
+@click.option('--num_layers', type=int, default=3)
+@click.option('--hyperbolic', type=bool, default=False)
 @click.option('--graph_embedder', type=str, default='GraphNN_KNN_v1')
 @click.option('--edge_classifier', type=str, default='EdgeClassifier_v1')
 def main(
         datafile='./data/train_.pt',
         epochs=1000,
         learning_rate=1e-3,
-        dim_out=144,
-        device='cuda:3',
+        gcn_dim=12,
+        hidden_dim=12,  # obsolete for now ;()
+        num_layers=3,
+        device='cpu',
         project_name='em_showers_net_training',
         work_space='schattengenie',
+        hyperbolic=False,
         graph_embedder='GraphNN_KNN_v1',
         edge_classifier='EdgeClassifier_v1'
 ):
+    edge_dim = 1
     experiment = Experiment(project_name=project_name, workspace=work_space)
-
     device = torch.device(device)
     showers = preprocess_dataset(datafile)
     showers_train, showers_test = train_test_split(showers, random_state=1337)
@@ -66,17 +70,44 @@ def main(
     train_loader = DataLoader(showers_train, batch_size=1, shuffle=True)
     test_loader = DataLoader(showers_test, batch_size=1, shuffle=True)
 
-    k = showers[0].x.shape[1]
-    print(k)
-    graph_embedder = str_to_class(graph_embedder)(dim_out=dim_out, k=k).to(device)
-    edge_classifier = str_to_class(edge_classifier)(dim_out=dim_out).to(device)
+    input_dim = showers[0].x.shape[1]
 
+    if hyperbolic:
+        manifold = manifolds.PoincareBall()  # .to(device)
+        graph_embedder = str_to_class(graph_embedder)(
+            manifold=manifold,
+            output_dim=gcn_dim,
+            hidden_dim=gcn_dim,
+            input_dim=input_dim,
+            edge_dim=edge_dim,
+            num_layers=num_layers
+        ).to(device)
+
+        edge_classifier = str_to_class(edge_classifier)(
+            manifold=manifold,
+            input_dim=gcn_dim + edge_dim
+        ).to(device)
+        optimizer = RiemannianAdam(
+            list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
+            lr=learning_rate, stabilize=True
+        )
+    else:
+        graph_embedder = str_to_class(graph_embedder)(
+            output_dim=gcn_dim,
+            hidden_dim=gcn_dim,
+            input_dim=input_dim,
+            num_layers=num_layers
+        ).to(device)
+        edge_classifier = str_to_class(edge_classifier)(
+            input_dim=output_dim + edge_dim
+        ).to(device)
+        optimizer = torch.optim.Adam(
+            list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
+            lr=learning_rate  # , stabilize=True
+        )
     criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(
-        list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
-        lr=learning_rate
-    )
 
+    # torch.optim.Adam
     loss_train = RunningAverageMeter()
     loss_test = RunningAverageMeter()
     roc_auc_test = RunningAverageMeter()
