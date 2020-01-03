@@ -44,7 +44,7 @@ def load_mc(filename="./EM_data/mcdata_taue2.root", step=1):
     return pmc
 
 
-def pmc_to_ship_format(pmc):
+def pmc_to_ship_format(pmc, num_showers_in_brick):
     showers = defaultdict(list)
     for i, idx in enumerate(pmc.index):
         shower = pmc.loc[idx]
@@ -62,8 +62,9 @@ def pmc_to_ship_format(pmc):
         showers['ele_TX'].extend(n * [shower['ele_sx']])
         showers['ele_TY'].extend(n * [shower['ele_sy']])
 
-        showers['signal'].extend(n * [i % NUM_SHOWERS_IN_BRICK])
-        showers['brick_id'].extend(n * [i // NUM_SHOWERS_IN_BRICK])
+        showers['numtracks'].extend(n * [shower['numtracks']])
+        showers['signal'].extend(n * [i % num_showers_in_brick])
+        showers['brick_id'].extend(n * [i // num_showers_in_brick])
 
     return showers
 
@@ -77,14 +78,15 @@ def gen_one_shower(df_brick, knn=False, r=250, k=5, directed=False, e=0.00005, s
         edges_from, edge_to, dist = generate_k_nearest_graph(
             df_brick[["brick_id", "SX", "SY", "SZ", "TX", "TY"]].values,
             k, e=e,
-            symmetric=directed);
+            symmetric=directed)
         edges = np.vstack([edges_from, edge_to])
         dist = np.array(dist)
         edge_index = torch.LongTensor(edges)
     else:
-        edges_from, edge_to, dist = generate_radius_graph(df_brick[["brick_id", "SX", "SY", "SZ", "TX", "TY"]].values,
-                                                          r, e=e,
-                                                          symmetric=directed);
+        edges_from, edge_to, dist = generate_radius_graph(
+            df_brick[["brick_id", "SX", "SY", "SZ", "TX", "TY"]].values,
+            r, e=e,
+            symmetric=directed)
         edges = np.vstack([edges_from, edge_to])
         dist = np.array(dist)
         edge_index = torch.LongTensor(edges)
@@ -121,10 +123,17 @@ def gen_torch_showers(df, knn=False, r=250, k=5, directed=False, e=0.00005, scal
 @click.option('--k', type=int, default=10)
 @click.option('--directed', type=bool, default=False)
 @click.option('--e', type=float, default=10)
-def main(root_file='./data/mcdata_taue2.root', output_file='./data/train.pt', knn=True, k=10, directed=False, e=10):
+@click.option('--num_showers_in_brick', type=int, default=200)
+def main(
+        root_file='./data/mcdata_taue2.root',
+        output_file='./data/train.pt',
+        knn=True, k=10, directed=False,
+        e=10, num_showers_in_brick=200
+):
     pmc = load_mc(filename=root_file, step=1)
+    print(pmc.columns)
     pmc = pmc.loc[(pmc["BT_X"].apply(lambda x: len(x)) > 70) & (pmc["BT_X"].apply(lambda x: len(x)) < 3000), :]
-    showers = pmc_to_ship_format(pmc)
+    showers = pmc_to_ship_format(pmc, num_showers_in_brick=num_showers_in_brick)
     df = pd.DataFrame(showers)
     showers = gen_torch_showers(df=df, knn=knn, k=k, directed=directed, e=e)
     torch.save(showers, output_file)
