@@ -87,7 +87,7 @@ class DiracClassifier(nn.Module):
         emb_out = embeddings[edge_index[1], :]
         sqdist = self.manifold.sqdist(emb_in, emb_out, self.c)
         probs = self.dc.forward(sqdist)
-        return probs
+        return 2. * probs
 
 
 class EdgeDenseClassifier(nn.Module):
@@ -115,6 +115,6 @@ class EdgeDenseClassifierEdgeAttribute(nn.Module):
         )
 
     def forward(self, shower, embeddings, edge_index):
-        x = torch.cat([embeddings[edge_index[0]], embeddings[edge_index[0]]], 1)
+        x = torch.cat([embeddings[edge_index[0]], embeddings[edge_index[1]]], 1)
         x = torch.cat([x, shower.edge_attr], 1)
         return self.edge_classifier(x)

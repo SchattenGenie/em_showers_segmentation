@@ -16,6 +16,17 @@ from hgcn import manifolds
 from tqdm import tqdm
 import classification_losses
 import sys
+import os
+
+
+def get_freer_gpu():
+    """
+    Function to get the freest GPU available in the system
+    :return:
+    """
+    os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
+    memory_available = [int(x.split()[2]) for x in open('tmp', 'r').readlines()]
+    return np.argmax(memory_available)
 
 
 def str_to_class(classname: str):
@@ -55,13 +66,18 @@ def main(
         gcn_dim=12,
         hidden_dim=12,  # obsolete for now ;()
         num_layers=3,
-        device='cpu',
         project_name='em_showers_net_training',
         work_space='schattengenie',
         hyperbolic=False,
         graph_embedder='GraphNN_KNN_v1',
         edge_classifier='EdgeClassifier_v1'
 ):
+    if torch.cuda.is_available():
+        device = torch.device('cuda:{}'.format(get_freer_gpu()))
+    else:
+        device = torch.device('cpu')
+    print("Using device = {}".format(device))
+
     edge_dim = 1
     experiment = Experiment(project_name=project_name, workspace=work_space)
     device = torch.device(device)
@@ -74,7 +90,7 @@ def main(
     input_dim = showers[0].x.shape[1]
 
     if hyperbolic:
-        manifold = manifolds.PoincareBall()  # .to(device)
+        manifold = manifolds.PoincareBall()
         graph_embedder = str_to_class(graph_embedder)(
             manifold=manifold,
             output_dim=gcn_dim,
@@ -86,7 +102,8 @@ def main(
 
         edge_classifier = str_to_class(edge_classifier)(
             manifold=manifold,
-            input_dim=2 * gcn_dim + edge_dim
+            input_dim=2 * gcn_dim + edge_dim,
+            c=graph_embedder.curvatures[-1]
         ).to(device)
         optimizer = RiemannianAdam(
             list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
