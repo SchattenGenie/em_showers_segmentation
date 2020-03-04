@@ -19,7 +19,7 @@ def class_disbalance_graphx__(graphx):
     return np.unique(signal, return_counts=True)
 
 
-def estimate_e(cluster, angle=0.05):
+def estimate_e(cluster, angle=0.1):
     x, y, z = estimate_start_xyz(cluster)
     tx, ty = estimate_txty(cluster)
     n = 0
@@ -27,16 +27,14 @@ def estimate_e(cluster, angle=0.05):
         dx = node['features']['SX'] - x
         dy = node['features']['SY'] - y
         dz = node['features']['SZ'] - z
-        dx = dx / dz - tx
-        dy = dy / dz - ty
-        dz = dz / dz
+        dx = dx / (dz + 1e-3) - tx
+        dy = dy / (dz + 1e-3) - ty
         if sqrt(dx ** 2 + dy ** 2) < angle:
             n += 1
-
     return n
 
 
-def estimate_start_xyz(cluster, k=3, shift_x=0., shift_y=0., shift_z=-2000.):
+def estimate_start_xyz(cluster, k=3, shift_x=0., shift_y=0., shift_z=0.):
     xs = []
     ys = []
     zs = []
