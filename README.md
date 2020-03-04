@@ -21,12 +21,7 @@ python graph_generation.py --root_file ./data/mcdata_taue2.root --output_file ./
 Next step is to train classier network, that is going to discriminated edges between those that connect nodes from the same class and those which belogs to different classes.
 
 ```
-python training_classifier.py  --datafile ./data/train.pt --epochs 1000 --learning_rate 1e-3 --output_dim 144 --graph_embedder GraphNN_KNN_v1 --edge_classifier EdgeClassifier_v1 --project_name em_showers_network_training --work_space schattengenie
-```
-
-
-```
-python training_classifier.py  --datafile ./data/train_.pt --epochs 1000 --learning_rate 1e-3 --output_dim 12 --graph_embedder HGCNResidualEmulsionConv --edge_classifier DiracClassifier --project_name em_showers_network_training --work_space schattengenie
+python training_classifier.py  --datafile ./data/train_3_directed.pt --epochs 1000 --learning_rate 1e-3 --output_dim 32 --graph_embedder GraphNN_KNN_v1 --edge_classifier EdgeClassifier_v1 --project_name em_showers_network_training --work_space schattengenie
 ```
 
 ## 3. Clustering of EM showers
@@ -34,5 +29,9 @@ python training_classifier.py  --datafile ./data/train_.pt --epochs 1000 --learn
 Using networks weights from previous step we can perform clustering end estimate quality:
 
 ```
-python clustering.py --project_name em_showers_clustering --work_space schattengenie --min_cl 40 --cl_size 40 --threshold 0.9
+python clustering.py --datafile ./data/train.pt --project_name em_showers_clustering --work_space schattengenie --min_cl 40 --cl_size 40 --threshold 0.9
+```
+
+```bash
+python clustering.py  --datafile ./data/train.pt --project_name em_showers_clustering --work_space schattengenie --baseline True --min_cl 40 --cl_size 40 --threshold 0.9
 ```

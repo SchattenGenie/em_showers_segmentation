@@ -175,8 +175,8 @@ def run_hdbscan(G, cl_size=20, order=True):
     # core_d was deleted => could be returned. Leverage robustness / cluster sharpness.
     edges = []
     for node_id_left, node_id_right, edge in G.edges(data=True):
-        node_left = G.node[node_id_left]
-        node_right = G.node[node_id_right]
+        node_left = G.nodes[node_id_left]
+        node_right = G.nodes[node_id_right]
         edges.append(
             (
                 node_id_left,
@@ -196,7 +196,7 @@ def run_hdbscan(G, cl_size=20, order=True):
     for node_id in G.nodes():
         clusters[node_id] = ClusterHDBSCAN(cl_size=cl_size, weight=np.inf, nodes=[node_id])
 
-    for i, j, weight, *_ in edges:
+    for i, j, weight, *_ in tqdm(edges):
         cluster_out = clusters[i]
         cluster_in = clusters[j]
 

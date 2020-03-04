@@ -14,7 +14,9 @@ from torch_geometric.data import Data
 from sklearn.neighbors import NearestNeighbors
 from tqdm import tqdm
 from collections import defaultdict
+from joblib import Parallel, delayed
 import click
+
 # !cd tools/ && python setup_opera_distance_metric.py build_ext --inplace
 
 
@@ -33,7 +35,7 @@ def load_mc(filename="./EM_data/mcdata_taue2.root", step=1):
     pmc = pmc[pmc.ele_z < 0]
     shapechange.append(pmc.shape[0])
 
-    pmc = pmc[pmc.numtracks > 3]
+    pmc = pmc[pmc.numtracks > 70]
     shapechange.append(pmc.shape[0])
     print("numtracks reduction by cuts: ", shapechange)
     pmc['m_BT_X'] = pmc.BT_X.apply(lambda x: x.mean())
@@ -69,24 +71,24 @@ def pmc_to_ship_format(pmc, num_showers_in_brick):
     return showers
 
 
-from joblib import Parallel, delayed
-
-
-def gen_one_shower(df_brick, knn=False, r=250, k=5, directed=False, e=0.00005, scale=1e4):
+def gen_one_shower(df_brick, knn=False, r=250, k=5, symmetric=False, directed=False, e=0.00005, scale=1e4):
+    print('Start!')
     from tools.opera_distance_metric import generate_k_nearest_graph, opera_distance_metric_py, generate_radius_graph
     if knn:
         edges_from, edge_to, dist = generate_k_nearest_graph(
             df_brick[["brick_id", "SX", "SY", "SZ", "TX", "TY"]].values,
-            k, e=e,
-            symmetric=directed)
+            k,
+            e=e,
+            symmetric=symmetric, directed=directed)
         edges = np.vstack([edges_from, edge_to])
         dist = np.array(dist)
         edge_index = torch.LongTensor(edges)
     else:
         edges_from, edge_to, dist = generate_radius_graph(
             df_brick[["brick_id", "SX", "SY", "SZ", "TX", "TY"]].values,
-            r, e=e,
-            symmetric=directed)
+            r,
+            e=e,
+            symmetric=symmetric, directed=directed)
         edges = np.vstack([edges_from, edge_to])
         dist = np.array(dist)
         edge_index = torch.LongTensor(edges)
@@ -108,10 +110,10 @@ def gen_one_shower(df_brick, knn=False, r=250, k=5, directed=False, e=0.00005, s
     return shower
 
 
-def gen_torch_showers(df, knn=False, r=250, k=5, directed=False, e=0.00005, scale=1e4):
-    df_bricks = [df[df.brick_id == brick_id] for brick_id in list(df.brick_id.unique())[:3]]
+def gen_torch_showers(df, knn=False, r=250, k=5, symmetric=False, directed=False, e=0.00005, scale=1e4):
+    df_bricks = [df[df.brick_id == brick_id] for brick_id in list(df.brick_id.unique())][:3]
     showers = Parallel(n_jobs=10)(
-        delayed(gen_one_shower)(df_brick, knn=knn, r=r, k=k, directed=directed, e=e, scale=scale) for df_brick in
+        delayed(gen_one_shower)(df_brick, knn=knn, r=r, k=k, symmetric=symmetric, directed=directed, e=e, scale=scale) for df_brick in
         df_bricks)
     return showers
 
@@ -121,21 +123,28 @@ def gen_torch_showers(df, knn=False, r=250, k=5, directed=False, e=0.00005, scal
 @click.option('--output_file', type=str, default='./data/train.pt')
 @click.option('--knn', type=bool, default=True)
 @click.option('--k', type=int, default=10)
+@click.option('--r', type=int, default=400)
 @click.option('--directed', type=bool, default=False)
+@click.option('--symmetric', type=bool, default=False)
 @click.option('--e', type=float, default=10)
 @click.option('--num_showers_in_brick', type=int, default=200)
 def main(
         root_file='./data/mcdata_taue2.root',
         output_file='./data/train.pt',
-        knn=True, k=10, directed=False,
-        e=10, num_showers_in_brick=200
+        knn=True,
+        k=10,
+        r=400,
+        directed=False,
+        symmetric=False,
+        e=10,
+        num_showers_in_brick=200
 ):
     pmc = load_mc(filename=root_file, step=1)
     print(pmc.columns)
     pmc = pmc.loc[(pmc["BT_X"].apply(lambda x: len(x)) > 70) & (pmc["BT_X"].apply(lambda x: len(x)) < 3000), :]
     showers = pmc_to_ship_format(pmc, num_showers_in_brick=num_showers_in_brick)
     df = pd.DataFrame(showers)
-    showers = gen_torch_showers(df=df, knn=knn, k=k, directed=directed, e=e)
+    showers = gen_torch_showers(df=df, knn=knn, k=k, r=r, symmetric=symmetric, directed=directed, e=e)
     torch.save(showers, output_file)
 
 

@@ -6,7 +6,6 @@ sns.set(font_scale=1)
 
 class RunningAverageMeter(object):
     """Computes and stores the average and current value"""
-
     def __init__(self, momentum=0.99):
         self.momentum = momentum
         self.val = None
@@ -28,16 +27,16 @@ class RunningAverageMeter(object):
 def plot_aucs(y_true, y_pred):
     fpr, tpr, thresholds = roc_curve(y_true, y_pred)
     precision, recall, thresholds = precision_recall_curve(y_true, y_pred)
-    fig, axs = plt.subplots(nrows=1, ncols=2, sharex=False, figsize=(12, 6), dpi=100)
+    fig, axs = plt.subplots(nrows=1, ncols=2, sharex=False, figsize=(8, 4), dpi=100)
 
     ax = axs[0]
     ax.plot([0, 1], [0, 1], linestyle='--', rasterized=True)
     # plot the roc curve for the model
-    ax.plot(fpr, tpr, marker='.')
+    ax.plot(fpr, tpr, marker='.', rasterized=True)
     ax.set_title('ROC curve')
 
     ax = axs[1]
-    ax.plot([0, 1], [0.5, 0.5], linestyle='--')
+    ax.plot([0, 1], [0.5, 0.5], linestyle='--', rasterized=True)
     ax.plot(recall, precision, marker='.', rasterized=True)
     ax.set_title('Precision-Recall Curve')
 

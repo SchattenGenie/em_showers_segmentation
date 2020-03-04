@@ -2,9 +2,10 @@ import numpy as np
 import constants
 import torch
 
-
 def round_Z_coodr(x):
     return constants.Z_centered[np.argmin(np.abs(constants.Z_centered - x))]
+
+
 round_Z_coodr = np.vectorize(round_Z_coodr)
 
 
@@ -32,10 +33,34 @@ def add_new_features(shower):
     shower.x = shower.x / (torch.tensor([10, 10, 10, 1, 1, 1, 100, 100, 100, 1e5]).float())
 
 
+def preprocess_subgraph(adj, order):
+    adj_selected = adj[:, order]
+    nodes_selected = adj_selected.unique()
+    nodes_selected_new = torch.arange(len(nodes_selected))
+    dictionary = dict(zip(nodes_selected.cpu().numpy(), nodes_selected_new.cpu().numpy()))
+    adj_selected_new = torch.tensor(np.vectorize(dictionary.get)(adj_selected.cpu().numpy())).long().to(adj)
+    return nodes_selected, adj_selected_new
+
+
 def preprocess_dataset(datafile):
-    showers = list(torch.load(datafile))[:2]
+    showers = list(torch.load(datafile))[:10]
     for i in range(len(showers)):
-        showers[i].orders = torch.tensor(create_mask(showers[i])).bool()
+        orders = torch.tensor(create_mask(showers[i])).bool()
+        showers[i].orders = orders
+        orders_preprocessed = []
+        for order in orders:
+            if order.sum():
+                nodes_selected, adj_selected_new = preprocess_subgraph(
+                    adj=showers[i].edge_index,
+                    order=order
+                )
+                orders_preprocessed.append(
+                    (nodes_selected, adj_selected_new)
+                )
+            else:
+                orders_preprocessed.append(None)
+        print("orders preprocessed", len(orders_preprocessed), len(orders))
+        showers[i].orders_preprocessed = orders_preprocessed
         add_new_features(showers[i])
         print(len(showers[i].x), showers[i].edge_index.shape[1])
     return showers
