@@ -74,7 +74,7 @@ def k_nearest_cut_pred(graphx, k):
     return graphx
 
 
-def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, threshold=0.5, baseline=False):
+def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, add_noise=0., threshold=0.5, baseline=False):
     G = nx.DiGraph()
     nodes_to_add = []
     showers_data = []
@@ -117,6 +117,7 @@ def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, thres
     if not baseline:
         _, weights = predict_one_shower(shower, graph_embedder=graph_embedder, edge_classifier=edge_classifier)
         weights = weights.detach().cpu().numpy()
+        weights = weights / (1 - weights)
         edge_index = shower.edge_index.t().detach().cpu().numpy()
         # weights = np.percentile(weights, q=90)
         edge_index = edge_index[weights > threshold]
@@ -126,10 +127,10 @@ def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, thres
     else:
         weights = shower.edge_attr.view(-1).detach().cpu().numpy()
         edge_index = shower.edge_index.t().detach().cpu().numpy()
-        # weights = np.exp(weights)
-        print(np.sort(weights))
+        weights = np.exp(weights)
         edge_index = edge_index[weights < threshold]
         weights = weights[weights < threshold]
+        weights = np.random.randn(len(weights)) * np.std(weights) * add_noise + weights
         print("Len weights", len(weights))
 
     for k, (p0, p1) in enumerate(edge_index):
@@ -317,7 +318,8 @@ def calc_clustering_metrics(clusterized_bricks, experiment):
 @click.option('--work_space', type=str, prompt='Enter workspace name')
 @click.option('--min_cl', type=int, default=40)
 @click.option('--cl_size', type=int, default=40)
-@click.option('--threshold', type=float, default=0.9)
+@click.option('--add_noise', type=float, default=0.)
+@click.option('--threshold', type=float, default=0.5)
 @click.option('--baseline', type=bool, default=False)
 @click.option('--hidden_dim', type=int, default=12)
 @click.option('--output_dim', type=int, default=12)
@@ -334,6 +336,7 @@ def main(
         cl_size=40,
         min_cl=40,
         threshold=0.9,
+        add_noise=0.,
         project_name='em_showers_clustering',
         work_space='schattengenie',
         graph_embedder='GraphNN_KNN_v1',
@@ -370,6 +373,7 @@ def main(
             graph_embedder=graph_embedder,
             edge_classifier=edge_classifier,
             threshold=threshold,
+            add_noise=add_noise,
             baseline=baseline
         )
         # TODO: cut succ and predecesive?

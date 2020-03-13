@@ -79,19 +79,20 @@ def main(
 
     input_dim = showers[0].x.shape[1]
     edge_dim = 1
-    graph_embedder = GraphNN_KNN_v1(  # str_to_class(graph_embedder)
+    graph_embedder = str_to_class(graph_embedder)(
         output_dim=output_dim,
         hidden_dim=hidden_dim,
         input_dim=input_dim,
         num_layers=num_layers
     ).to(device)
-    edge_classifier = EdgeClassifier_v1( # str_to_class(edge_classifier)
+    edge_classifier = str_to_class(edge_classifier)(
         input_dim=2 * output_dim + edge_dim,
     ).to(device)
     optimizer = torch.optim.Adam(
         list(graph_embedder.parameters()) + list(edge_classifier.parameters()),
         lr=learning_rate
     )
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5)
     class_prior = 0.025
     criterion = classification_losses.FocalLoss(gamma=3., alpha=1 - class_prior, device=device).to(device)
 
@@ -105,7 +106,6 @@ def main(
     for epoch in tqdm(range(epochs)):
         for shower in train_loader:
             shower = shower.to(device)
-            print(len(shower))
             edge_labels_true, edge_labels_predicted = predict_one_shower(shower,
                                                                          graph_embedder=graph_embedder,
                                                                          edge_classifier=edge_classifier)
@@ -122,13 +122,13 @@ def main(
         y_pred_list = []
         for shower in test_loader:
             shower = shower.to(device)
-            print(len(shower))
-            edge_labels_true, edge_labels_predicted = predict_one_shower(shower,
-                                                                         graph_embedder=graph_embedder,
-                                                                         edge_classifier=edge_classifier)
+            with torch.no_grad():
+                edge_labels_true, edge_labels_predicted = predict_one_shower(shower,
+                                                                             graph_embedder=graph_embedder,
+                                                                             edge_classifier=edge_classifier)
 
-            # calculate the batch loss
-            loss = criterion(edge_labels_predicted, edge_labels_true.float())
+                # calculate the batch loss
+                loss = criterion(edge_labels_predicted, edge_labels_true.float())
             y_true, y_pred = edge_labels_true.detach().cpu().numpy(), edge_labels_predicted.detach().cpu().numpy()
             y_true_list.append(y_true)
             y_pred_list.append(y_pred)
@@ -140,18 +140,18 @@ def main(
             acc_test.update(acc)
             roc_auc_test.update(roc_auc)
             # pr_auc_test.update(pr_auc)
-            print(loss.item(), roc_auc)
             class_disbalance.update((edge_labels_true.sum().float() / len(edge_labels_true)).item())
         torch.cuda.empty_cache()
+        print("loss_test.val={}, roc_auc_test.val={}".format(loss_test.val, roc_auc_test.val))
+        scheduler.step(roc_auc_test.val)
 
         experiment.log_metric('loss_test', loss_test.val)
         experiment.log_metric('acc_test', acc_test.val)
         experiment.log_metric('roc_auc_test', roc_auc_test.val)
-        # experiment.log_metric('pr_auc_test', pr_auc_test.val)
         experiment.log_metric('class_disbalance', class_disbalance.val)
 
-        y_true = np.concatenate(y_true_list)
-        y_pred = np.concatenate(y_pred_list)
+        # y_true = np.concatenate(y_true_list)
+        # y_pred = np.concatenate(y_pred_list)
         # f = plot_aucs(y_true=y_true, y_pred=y_pred)
         # experiment.log_figure("Optimization dynamic", f, overwrite=True)
         # plt.close(f)

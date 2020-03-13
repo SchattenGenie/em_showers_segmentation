@@ -11,7 +11,9 @@ import torch_cluster
 from torch_geometric.nn import NNConv, GCNConv, GraphConv
 from torch_geometric.nn import PointConv, EdgeConv, SplineConv
 from torch.utils.checkpoint import checkpoint
+from functools import partial
 import numpy as np
+RESIDUALS = False
 
 
 def extract_subgraph(h, adj, edge_attr, order):
@@ -131,34 +133,84 @@ class GraphNN_KNN_v1(nn.Module):
         self.emconv1 = EmulsionConv(self.hidden_dim, self.hidden_dim)
         self.linear2 = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.ReLU())
         self.emconv2 = EmulsionConv(self.hidden_dim, self.hidden_dim)
+        self.linear3 = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.ReLU())
+        self.emconv3 = EmulsionConv(self.hidden_dim, self.hidden_dim)
         self.wconv1 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
         self.wconv2 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
         self.wconv3 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
         self.wconv4 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
+        self.wconv5 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
         self.output = nn.Linear(self.hidden_dim, output_dim)
         init_bias_model(self, b=0.)
 
     def forward(self, data):
         x, edge_index, orders, edge_attr = data.x, data.edge_index, data.orders, data.edge_attr
         orders_preprocessed = data.orders_preprocessed[0]
-        print("orders preprocessed", len(orders_preprocessed), len(orders))
 
         x = self.linear1(x)
-        x = self.emconv1(x=x, edge_index=edge_index, orders=orders, edge_attr=edge_attr, orders_preprocessed=orders_preprocessed)
-        # x = x + x_new
-        x = self.linear2(x)
-        x = self.emconv2(x=x, edge_index=edge_index, orders=orders, edge_attr=edge_attr, orders_preprocessed=orders_preprocessed)
-        # x = x + x_new
-        # x = checkpoint(self.emconv, x=x, edge_index=edge_index, orders=orders)
-        x = self.wconv1(x=x, edge_index=edge_index)
-        # x = x + x_new
-        # x = checkpoint(self.emconv, x=x, edge_index=edge_index, orders=orders)
-        x = self.wconv2(x=x, edge_index=edge_index)
-        # x = x + x_new
-        # x = checkpoint(self.emconv, x=x, edge_index=edge_index, orders=orders)
-        x = self.wconv3(x=x, edge_index=edge_index)
-        # x = x + x_new
-        x = self.wconv4(x=x, edge_index=edge_index)
+
+        if RESIDUALS:
+            emconv1 = partial(self.emconv1, orders_preprocessed=orders_preprocessed)
+            x = checkpoint(emconv1,
+                           x,
+                           edge_index,
+                           orders,
+                           edge_attr) + x
+            x = self.linear2(x)
+            emconv2 = partial(self.emconv2, orders_preprocessed=orders_preprocessed)
+            x = checkpoint(emconv2,
+                           x,
+                           edge_index,
+                           orders,
+                           edge_attr) + x
+            x = checkpoint(self.wconv1,
+                           x,
+                           edge_index) + x
+            x = checkpoint(self.wconv2,
+                           x,
+                           edge_index) + x
+            x = checkpoint(self.wconv3,
+                           x,
+                           edge_index) + x
+            x = checkpoint(self.wconv4,
+                           x,
+                           edge_index) + x
+        else:
+            emconv1 = partial(self.emconv1, orders_preprocessed=orders_preprocessed)
+            x = checkpoint(emconv1,
+                           x,
+                           edge_index,
+                           orders,
+                           edge_attr)
+            x = self.linear2(x)
+            emconv2 = partial(self.emconv2, orders_preprocessed=orders_preprocessed)
+            x = checkpoint(emconv2,
+                           x,
+                           edge_index,
+                           orders,
+                           edge_attr)
+            emconv3 = partial(self.emconv3, orders_preprocessed=orders_preprocessed)
+            x = self.linear3(x)
+            x = checkpoint(emconv3,
+                           x,
+                           edge_index,
+                           orders,
+                           edge_attr)
+            x = checkpoint(self.wconv1,
+                           x,
+                           edge_index)
+            x = checkpoint(self.wconv2,
+                           x,
+                           edge_index)
+            x = checkpoint(self.wconv3,
+                           x,
+                           edge_index)
+            x = checkpoint(self.wconv4,
+                           x,
+                           edge_index)
+            x = checkpoint(self.wconv5,
+                           x,
+                           edge_index)
         return self.output(x)
 
 
@@ -185,8 +237,8 @@ class EdgeClassifier_v1(nn.Module):
             shower.edge_attr
         ], dim=1)
         for layer in self._layers:
-            embeddings = layer(embeddings)
-            # x = checkpoint(layer, embeddings)
+            # embeddings = layer(embeddings)
+            embeddings = checkpoint(layer, embeddings)
         return embeddings
 
 

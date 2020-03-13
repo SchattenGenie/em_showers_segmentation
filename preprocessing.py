@@ -43,7 +43,7 @@ def preprocess_subgraph(adj, order):
 
 
 def preprocess_dataset(datafile):
-    showers = list(torch.load(datafile))[:10]
+    showers = list(torch.load(datafile))
     for i in range(len(showers)):
         orders = torch.tensor(create_mask(showers[i])).bool()
         showers[i].orders = orders
