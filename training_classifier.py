@@ -104,6 +104,7 @@ def main(
     class_disbalance = RunningAverageMeter()
     best_roc_auc = 0.
     for epoch in tqdm(range(epochs)):
+        optimizer.zero_grad()
         for shower in train_loader:
             shower = shower.to(device)
             edge_labels_true, edge_labels_predicted = predict_one_shower(shower,
@@ -112,11 +113,10 @@ def main(
             # calculate the batch loss
             loss = criterion(edge_labels_predicted, edge_labels_true.float())
             # Zero gradients, perform a backward pass, and update the weights.
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            (loss / len(train_loader)).backward()
             loss_train.update(loss.item())
             class_disbalance.update((edge_labels_true.sum().float() / len(edge_labels_true)).item())
+        optimizer.step()
         torch.cuda.empty_cache()
         y_true_list = []
         y_pred_list = []

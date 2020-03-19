@@ -12,7 +12,7 @@ from preprocessing import preprocess_dataset
 from viz_utils import RunningAverageMeter, plot_aucs
 from tqdm import tqdm
 import networkx as nx
-from hdbscan import run_hdbscan_on_brick, run_hdbscan
+from custom_hdbscan import run_hdbscan_on_brick, run_hdbscan
 import clustering_metrics
 from clustering_metrics import class_disbalance_graphx, class_disbalance_graphx__
 from clustering_metrics import estimate_e, estimate_start_xyz, estimate_txty
