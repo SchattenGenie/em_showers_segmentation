@@ -16,15 +16,15 @@ import numpy as np
 RESIDUALS = False
 
 
-def extract_subgraph(h, adj, edge_attr, order):
+def extract_subgraph(h, adj, edge_features, order):
     adj_selected = adj[:, order]
-    edge_attr_selected = edge_attr[order, :]
+    edge_features_selected = edge_features[order, :]
     nodes_selected = adj_selected.unique()
     h_selected = h[nodes_selected]
     nodes_selected_new = torch.arange(len(nodes_selected))
     dictionary = dict(zip(nodes_selected.cpu().numpy(), nodes_selected_new.cpu().numpy()))
     adj_selected_new = torch.tensor(np.vectorize(dictionary.get)(adj_selected.cpu().numpy())).long().to(adj)
-    return h_selected, nodes_selected, edge_attr_selected, adj_selected_new
+    return h_selected, nodes_selected, edge_features_selected, adj_selected_new
 
 
 class EmulsionConv(MessagePassing):
@@ -36,83 +36,27 @@ class EmulsionConv(MessagePassing):
         )
         self._direction = direction  # TODO: defines direction
 
-    def forward(self, x, edge_index, orders, edge_attr, orders_preprocessed):
+    def forward(self, x, edge_index, orders, edge_features, orders_preprocessed):
         x = x.clone()
         for i, order in enumerate(orders):
             if order.sum():
-                # print(i, len(orders_preprocessed), orders_preprocessed[i])
                 nodes_selected, adj_selected_new = orders_preprocessed[i]
                 nodes_selected = nodes_selected.to(x).long()
                 adj_selected_new = adj_selected_new.to(x).long()
                 x_selected = x[nodes_selected]
-                edge_attr_selected = edge_attr[order, :]
+                edge_features_selected = edge_features[order, :]
                 x_selected = self.message(
                     x_j=x_selected[adj_selected_new[0]],
                     x_i=x_selected[adj_selected_new[1]],
-                    edge_attr=edge_attr_selected
+                    edge_features=edge_features_selected
                 )
                 x_selected = scatter_('add', x_selected, adj_selected_new[self._direction],
                                       dim=0, dim_size=len(nodes_selected))
                 x[nodes_selected] = (x[nodes_selected] + x_selected) / 2.
         return x
 
-    def message(self, x_j, x_i, edge_attr):
-        return self.mp(torch.cat([x_i, x_j - x_i, edge_attr.view(len(x_i), -1)], dim=1))
-
-    def update(self, aggr_out, x):
-        return aggr_out + x
-
-
-class EmulsionConvSlow(MessagePassing):
-    def __init__(self, in_channels, out_channels, edge_dim=1, direction=0):
-        super().__init__(aggr='add')
-        self.mp = nn.Sequential(
-            nn.Linear(in_channels * 2 + edge_dim, out_channels),
-            nn.ReLU()
-        )
-        self._direction = direction  # TODO: defines direction
-
-    def forward(self, x, edge_index, orders, edge_attr):
-        x = x.clone()
-        for order in orders:
-            if order.sum():
-                x_selected, nodes_selected, edge_attr_selected, adj_selected_new = extract_subgraph(
-                    h=x,
-                    adj=edge_index,
-                    edge_attr=edge_attr,
-                    order=order
-                )
-                x_selected = self.message(
-                    x_j=x_selected[adj_selected_new[0]],
-                    x_i=x_selected[adj_selected_new[1]],
-                    edge_attr=edge_attr_selected
-                )
-                x_selected = scatter_('add', x_selected, adj_selected_new[self._direction],
-                                      dim=0, dim_size=len(nodes_selected))
-                x[nodes_selected] = (x[nodes_selected] + x_selected) / 2.
-        return x
-
-    def message(self, x_j, x_i, edge_attr):
-        return self.mp(torch.cat([x_i, x_j - x_i, edge_attr.view(len(x_i), -1)], dim=1))
-
-    def update(self, aggr_out, x):
-        return aggr_out + x
-
-
-class EmulsionConvOldSlow(MessagePassing):
-    def __init__(self, in_channels, out_channels):
-        super().__init__(aggr='add')
-        self.mp = torch.nn.Linear(in_channels * 2, out_channels)
-
-    def forward(self, x, edge_index, orders):
-        for order in orders:
-            x = self.propagate(torch.index_select(edge_index[:, order],
-                                                  0,
-                                                  torch.LongTensor([1, 0]).to(x.device)), x=x)
-        return x
-
-    def message(self, x_j, x_i):
-        return self.mp(torch.cat([x_i, x_j - x_i], dim=1))
+    def message(self, x_j, x_i, edge_features):
+        return self.mp(torch.cat([x_i, x_j - x_i, edge_features], dim=1))
 
     def update(self, aggr_out, x):
         return aggr_out + x
@@ -125,92 +69,60 @@ def init_bias_model(model, b: float):
 
 
 class GraphNN_KNN_v1(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim=10, bias_init=0., **kwargs):
+    def __init__(self,
+                 input_dim,
+                 hidden_dim,
+                 edge_dim=1,
+                 output_dim=10,
+                 num_layers_emulsion=3,
+                 num_layers_edge_conv=3,
+                 bias_init=0., **kwargs):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.linear1 = nn.Sequential(nn.Linear(self.input_dim, self.hidden_dim), nn.ReLU())
-        self.emconv1 = EmulsionConv(self.hidden_dim, self.hidden_dim)
-        self.linear2 = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.ReLU())
-        self.emconv2 = EmulsionConv(self.hidden_dim, self.hidden_dim)
-        self.linear3 = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.ReLU())
-        self.emconv3 = EmulsionConv(self.hidden_dim, self.hidden_dim)
-        self.wconv1 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
-        self.wconv2 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
-        self.wconv3 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
-        self.wconv4 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
-        self.wconv5 = EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
+        previous_dim = input_dim
+        self._layers = nn.ModuleList()
+        for i in range(num_layers_emulsion):
+            self._layers.append(
+                nn.Sequential(nn.Linear(previous_dim, self.hidden_dim), nn.ReLU())
+            )
+            self._layers.append(
+                EmulsionConv(self.hidden_dim, self.hidden_dim, edge_dim=edge_dim)
+            )
+            previous_dim = self.hidden_dim
+
+        for i in range(num_layers_edge_conv):
+            if num_layers_emulsion == 0 and i == 0:
+                self._layers.append(
+                    nn.Sequential(nn.Linear(previous_dim, self.hidden_dim), nn.ReLU())
+                )
+            self._layers.append(
+                EdgeConv(Sequential(nn.Linear(2 * self.hidden_dim, self.hidden_dim), nn.ReLU()), 'max')
+            )
+
         self.output = nn.Linear(self.hidden_dim, output_dim)
         init_bias_model(self, b=0.)
 
     def forward(self, data):
-        x, edge_index, orders, edge_attr = data.x, data.edge_index, data.orders, data.edge_attr
+        x, edge_index, orders, edge_features = data.x, data.edge_index, data.orders, data.edge_features
         orders_preprocessed = data.orders_preprocessed[0]
 
-        x = self.linear1(x)
+        x = self._layers[0](x)
 
-        if RESIDUALS:
-            emconv1 = partial(self.emconv1, orders_preprocessed=orders_preprocessed)
-            x = checkpoint(emconv1,
-                           x,
-                           edge_index,
-                           orders,
-                           edge_attr) + x
-            x = self.linear2(x)
-            emconv2 = partial(self.emconv2, orders_preprocessed=orders_preprocessed)
-            x = checkpoint(emconv2,
-                           x,
-                           edge_index,
-                           orders,
-                           edge_attr) + x
-            x = checkpoint(self.wconv1,
-                           x,
-                           edge_index) + x
-            x = checkpoint(self.wconv2,
-                           x,
-                           edge_index) + x
-            x = checkpoint(self.wconv3,
-                           x,
-                           edge_index) + x
-            x = checkpoint(self.wconv4,
-                           x,
-                           edge_index) + x
-        else:
-            emconv1 = partial(self.emconv1, orders_preprocessed=orders_preprocessed)
-            x = checkpoint(emconv1,
-                           x,
-                           edge_index,
-                           orders,
-                           edge_attr)
-            x = self.linear2(x)
-            emconv2 = partial(self.emconv2, orders_preprocessed=orders_preprocessed)
-            x = checkpoint(emconv2,
-                           x,
-                           edge_index,
-                           orders,
-                           edge_attr)
-            emconv3 = partial(self.emconv3, orders_preprocessed=orders_preprocessed)
-            x = self.linear3(x)
-            x = checkpoint(emconv3,
-                           x,
-                           edge_index,
-                           orders,
-                           edge_attr)
-            x = checkpoint(self.wconv1,
-                           x,
-                           edge_index)
-            x = checkpoint(self.wconv2,
-                           x,
-                           edge_index)
-            x = checkpoint(self.wconv3,
-                           x,
-                           edge_index)
-            x = checkpoint(self.wconv4,
-                           x,
-                           edge_index)
-            x = checkpoint(self.wconv5,
-                           x,
-                           edge_index)
+        for layer in self._layers[1:]:
+            if isinstance(layer, EmulsionConv):
+                layer = partial(layer, orders_preprocessed=orders_preprocessed)
+                x = checkpoint(layer,
+                               x,
+                               edge_index,
+                               orders,
+                               edge_features)
+            elif isinstance(layer, EdgeConv):
+                x = checkpoint(layer,
+                               x,
+                               edge_index)
+            else:
+                x = layer(x)
         return self.output(x)
 
 
@@ -234,10 +146,9 @@ class EdgeClassifier_v1(nn.Module):
         embeddings = torch.cat([
             embeddings[edge_index[0]],
             embeddings[edge_index[1]],
-            shower.edge_attr
+            shower.edge_features
         ], dim=1)
         for layer in self._layers:
-            # embeddings = layer(embeddings)
             embeddings = checkpoint(layer, embeddings)
         return embeddings
 

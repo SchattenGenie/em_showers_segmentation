@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from tqdm import tqdm
 import networkx as nx
 import numpy as np
+import hdbscan
 
 
 @total_ordering
@@ -88,14 +89,14 @@ class ClusterHDBSCAN(object):
 
     def set_weight_birth(self, weight: float):
         self.weight_birth = weight
-        self.lambda_birth = 1 / (weight + 1e-5)
+        self.lambda_birth = 1. / (weight + 1e-5)
 
     def calculate_stability(self):
         self.stability = 0.
-        self.lambda_birth = 1 / (max(self.weights_nodes_dict.keys()) + 1e-5)
-        norm = self.lambda_birth
+        self.lambda_birth = 1. / (max(self.weights_nodes_dict.keys()) + 1e-5)
+        # norm = self.lambda_birth len(self.weights_nodes_dict[weight]) *
         for weight in self.weights_nodes_dict:
-            self.stability += len(self.weights_nodes_dict[weight]) * (1 / (weight + 1e-5) - self.lambda_birth) * norm
+            self.stability += (1 / (weight + 1e-5) - self.lambda_birth)  # * len(self.weights_nodes_dict[weight]) * norm
 
 
 def calc_stabilities(root):
@@ -160,7 +161,7 @@ def max_level_clusters(root, level=0, max_level=2):
 
 
 def recalc_tree(root):
-    weights_children = 0
+    weights_children = 0.
     for child in root:
         weights_children += recalc_tree(child)
     if weights_children > root.stability:
@@ -171,7 +172,40 @@ def recalc_tree(root):
     return root.stability
 
 
-def run_hdbscan(G, cl_size=20, order=True):
+def mutual_reachability(distance_matrix, min_points=5, alpha=1.0):
+    size = distance_matrix.shape[0]
+    min_points = min(size - 1, min_points)
+    try:
+        core_distances = np.partition(distance_matrix,
+                                      min_points,
+                                      axis=0)[min_points]
+    except AttributeError:
+        core_distances = np.sort(distance_matrix,
+                                 axis=0)[min_points]
+
+    if alpha != 1.0:
+        distance_matrix = distance_matrix / alpha
+
+    stage1 = np.where(core_distances > distance_matrix,
+                      core_distances, distance_matrix)
+    result = np.where(core_distances > stage1.T,
+                      core_distances.T, stage1.T).T
+    return result
+
+
+def run_hdbscan(G, cl_size=20, min_samples_core=5, order=True):
+    # core d distances
+    G_old = nx.Graph(G)
+    adj = nx.adjacency_matrix(G_old).toarray()
+    adj[adj == 0] = np.inf
+    adj = mutual_reachability(adj, min_points=min_samples_core)
+    nodes_adj_map = {n: i for i, n in enumerate(G.nodes())}
+    for i, j, edge in G.edges(data=True):
+        edge["weight"] = adj[nodes_adj_map[i], nodes_adj_map[j]]
+
+    # % % time
+    G = nx.minimum_spanning_tree(nx.Graph(G))
+    print("min span treee")
     # core_d was deleted => could be returned. Leverage robustness / cluster sharpness.
     edges = []
     for node_id_left, node_id_right, edge in G.edges(data=True):
@@ -228,12 +262,12 @@ def run_hdbscan(G, cl_size=20, order=True):
             root = cluster
 
     calc_stabilities(root)
-    # recalc_tree(root)
+    recalc_tree(root)
     clusters = list(leaf_clusters(root))
     return clusters, root
 
 
-def run_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, order=True):
+def run_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, min_samples_core=5, order=True):
     connected_components = []
     for cnn in nx.connected_components(nx.Graph(graphx)):
         if len(cnn) > min_cl:
@@ -245,7 +279,40 @@ def run_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, order=True):
         if len(G) < 100:
             clusters.append(G)
         else:
-            clusters_hdbscan, root_hdbscan = run_hdbscan(G, cl_size=cl_size, order=order)
+            clusters_hdbscan, root_hdbscan = run_hdbscan(G, cl_size=cl_size, order=order, min_samples_core=min_samples_core)
+            roots.append(root_hdbscan)
+            clusters.extend(clusters_hdbscan)
+
+    return graphx, clusters, roots
+
+def run_vanilla_hdbscan(G, cl_size, min_samples_core=5, order=None):
+    distance_matrix = nx.adjacency_matrix(nx.Graph(G)).toarray().astype(np.float64)
+    distance_matrix[distance_matrix == 0.] = np.inf
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=cl_size,
+                                min_samples=min_samples_core,
+                                metric="precomputed",
+                                core_dist_n_jobs=-1)  # precomputed
+    clusterer.fit(distance_matrix)
+    clusters = []
+    for lab in np.unique(clusterer.labels_):
+        clusters.append(G.subgraph(np.array(list(G.nodes))[clusterer.labels_ == lab]))
+    return clusters, None
+
+
+def run_vanilla_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, min_samples_core=5, order=True):
+    connected_components = []
+    for cnn in nx.connected_components(nx.Graph(graphx)):
+        if len(cnn) > min_cl:
+            print(len(cnn), end=", ")
+            connected_components.append(nx.DiGraph(graphx.subgraph(cnn)))
+    clusters = []
+    roots = []
+    for G in tqdm(connected_components):
+        if len(G) < 100:
+            clusters.append(G)
+        else:
+            clusters_hdbscan, root_hdbscan = run_vanilla_hdbscan(G, cl_size=cl_size, order=order,
+                                                                 min_samples_core=min_samples_core)
             roots.append(root_hdbscan)
             clusters.extend(clusters_hdbscan)
 

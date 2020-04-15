@@ -1,5 +1,5 @@
 import comet_ml
-from comet_ml import OfflineExperiment as Experiment
+from comet_ml import Experiment
 import numpy as np
 import torch
 import torch.nn as nn
@@ -13,6 +13,7 @@ from viz_utils import RunningAverageMeter, plot_aucs
 from tqdm import tqdm
 import networkx as nx
 from custom_hdbscan import run_hdbscan_on_brick, run_hdbscan
+from custom_hdbscan import run_vanilla_hdbscan, run_vanilla_hdbscan_on_brick
 import clustering_metrics
 from clustering_metrics import class_disbalance_graphx, class_disbalance_graphx__
 from clustering_metrics import estimate_e, estimate_start_xyz, estimate_txty
@@ -117,12 +118,11 @@ def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, add_n
     if not baseline:
         _, weights = predict_one_shower(shower, graph_embedder=graph_embedder, edge_classifier=edge_classifier)
         weights = weights.detach().cpu().numpy()
-        weights = weights / (1 - weights)
+        weights =  -np.log((1 - weights) / (weights))
         edge_index = shower.edge_index.t().detach().cpu().numpy()
         # weights = np.percentile(weights, q=90)
         edge_index = edge_index[weights > threshold]
         weights = weights[weights > threshold]
-        weights = -np.log(weights)  # TODO: which transformation to use?
         print("Len weights", len(weights))
     else:
         weights = shower.edge_attr.view(-1).detach().cpu().numpy()
@@ -152,7 +152,6 @@ def calc_clustering_metrics(clusterized_bricks, experiment):
     number_of_stucked_showers = 0
     total_number_of_showers = 0
     number_of_good_showers = 0
-    number_of_survived_showers = 0
     second_to_first_ratios = []
 
     E_raw = []
@@ -198,8 +197,6 @@ def calc_clustering_metrics(clusterized_bricks, experiment):
                 signals_per_cluster.append(counts[labels == shower_data['signal']][0])
                 idx_cluster.append(i)
             signals_per_cluster = np.array(signals_per_cluster)
-            idx_cluster = np.array(idx_cluster)
-            second_to_first_ratio = 0.
 
             if len(signals_per_cluster) == 0:
                 number_of_lost_showers += 1
@@ -313,49 +310,57 @@ def calc_clustering_metrics(clusterized_bricks, experiment):
 
 
 @click.command()
-@click.option('--datafile', type=str, default='./data/train_.pt')
+@click.option('--datafile', type=str, default='./data/train_200_preprocessed.pt')
 @click.option('--project_name', type=str, prompt='Enter project name', default='em_showers_clustering')
-@click.option('--work_space', type=str, prompt='Enter workspace name')
+@click.option('--workspace', type=str, prompt='Enter workspace name')
 @click.option('--min_cl', type=int, default=40)
+@click.option('--min_samples_core', type=int, default=4)
 @click.option('--cl_size', type=int, default=40)
 @click.option('--add_noise', type=float, default=0.)
 @click.option('--threshold', type=float, default=0.5)
+@click.option('--vanilla_hdbscan', type=bool, default=False)
 @click.option('--baseline', type=bool, default=False)
-@click.option('--hidden_dim', type=int, default=12)
-@click.option('--output_dim', type=int, default=12)
-@click.option('--num_layers', type=int, default=3)
+@click.option('--hidden_dim', type=int, default=32)
+@click.option('--output_dim', type=int, default=32)
+@click.option('--num_layers_emulsion', type=int, default=3)
+@click.option('--num_layers_edge_conv', type=int, default=5)
 @click.option('--graph_embedder', type=str, default='GraphNN_KNN_v1')
 @click.option('--edge_classifier', type=str, default='EdgeClassifier_v1')
 @click.option('--graph_embedder_weights', type=str, default='GraphNN_KNN_v1')
 @click.option('--edge_classifier_weights', type=str, default='EdgeClassifier_v1')
 def main(
-        datafile='./data/train_.pt',
+        datafile='./data/train_200_preprocessed.pt',
         hidden_dim=12,
         output_dim=12,
-        num_layers=3,
+        num_layers_emulsion=3,
+        num_layers_edge_conv=3,
         cl_size=40,
         min_cl=40,
+        min_samples_core=5,
+        vanilla_hdbscan=False,
         threshold=0.9,
         add_noise=0.,
         project_name='em_showers_clustering',
-        work_space='schattengenie',
+        workspace='schattengenie',
         graph_embedder='GraphNN_KNN_v1',
         edge_classifier='EdgeClassifier_v1',
         baseline=False,
         graph_embedder_weights='GraphNN_KNN_v1', 
         edge_classifier_weights='EdgeClassifier_v1'
 ):
-    experiment = Experiment(project_name=project_name, workspace=work_space, offline_directory="/home/vbelavin/comet_ml_offline")
+    experiment = Experiment(project_name=project_name, workspace=workspace) #, offline_directory="/home/vbelavin/comet_ml_offline")
     device = torch.device('cpu')
-    showers = preprocess_dataset(datafile)
+    showers = torch.load(datafile)
     input_dim = showers[0].x.shape[1]
+    edge_dim = showers[0].edge_features.shape[1]
     showers = DataLoader(showers, batch_size=1, shuffle=False)
-    edge_dim = 1
     graph_embedder = str_to_class(graph_embedder)(
         output_dim=output_dim,
         hidden_dim=hidden_dim,
+        edge_dim=edge_dim,
+        num_layers_emulsion=num_layers_emulsion,
+        num_layers_edge_conv=num_layers_edge_conv,
         input_dim=input_dim,
-        num_layers=num_layers
     ).to(device)
     edge_classifier = str_to_class(edge_classifier)(
         input_dim=2 * output_dim + edge_dim,
@@ -376,10 +381,12 @@ def main(
             add_noise=add_noise,
             baseline=baseline
         )
-        # TODO: cut succ and predecesive?
         k_nearest_cut_succ(G, 25)
         k_nearest_cut_pred(G, 25)
-        graphx, clusters, roots = run_hdbscan_on_brick(G, min_cl=min_cl, cl_size=cl_size)
+        if vanilla_hdbscan:
+            graphx, clusters, roots = run_vanilla_hdbscan_on_brick(G, min_cl=min_cl, cl_size=cl_size, min_samples_core=min_samples_core)
+        else:
+            graphx, clusters, roots = run_hdbscan_on_brick(G, min_cl=min_cl, cl_size=cl_size, min_samples_core=min_samples_core)
         clusters_graphx = []
         for cluster in clusters:
             clusters_graphx.append(
