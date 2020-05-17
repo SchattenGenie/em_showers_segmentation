@@ -205,7 +205,6 @@ def run_hdbscan(G, cl_size=20, min_samples_core=5, order=True):
 
     # % % time
     G = nx.minimum_spanning_tree(nx.Graph(G))
-    print("min span treee")
     # core_d was deleted => could be returned. Leverage robustness / cluster sharpness.
     edges = []
     for node_id_left, node_id_right, edge in G.edges(data=True):
@@ -227,15 +226,21 @@ def run_hdbscan(G, cl_size=20, min_samples_core=5, order=True):
 
     # init
     clusters = {}
+    linkage_tree = []
+
+    current_id = 0
     for node_id in G.nodes():
-        clusters[node_id] = ClusterHDBSCAN(cl_size=cl_size, weight=np.inf, nodes=[node_id])
+        clusters[node_id] = (ClusterHDBSCAN(cl_size=cl_size, weight=np.inf, nodes=[node_id]), current_id)
+        current_id += 1
+    current_id -= 1
 
     for i, j, weight, *_ in tqdm(edges):
-        cluster_out = clusters[i]
-        cluster_in = clusters[j]
+        cluster_out, cluster_out_id = clusters[i]
+        cluster_in, cluster_in_id = clusters[j]
 
         if cluster_in is cluster_out:
             continue
+        current_id += 1
 
         if cluster_in.is_cluster and cluster_out.is_cluster:
             cluster = ClusterHDBSCAN(weight=weight, cl_size=cl_size, clusters=[cluster_in, cluster_out])
@@ -249,14 +254,16 @@ def run_hdbscan(G, cl_size=20, min_samples_core=5, order=True):
         cluster.nodes_out[i] += 1
         cluster.nodes_in[j] += 1
 
-        clusters.update({l: cluster for l in cluster.nodes})
+        clusters.update({l: (cluster, current_id) for l in cluster.nodes})
+        linkage_tree.append([cluster_in_id, cluster_out_id, weight, len(cluster)])
 
     clusters = list(set(clusters.values()))
 
     # choose biggest cluster
-    root = clusters[0]
-    length = len(clusters[0])
+    root = clusters[0][0]
+    length = len(clusters[0][0])
     for cluster in clusters:
+        cluster = cluster[0]
         if len(cluster) > length:
             length = len(cluster)
             root = cluster
@@ -264,14 +271,13 @@ def run_hdbscan(G, cl_size=20, min_samples_core=5, order=True):
     calc_stabilities(root)
     recalc_tree(root)
     clusters = list(leaf_clusters(root))
-    return clusters, root
+    return clusters, root, linkage_tree
 
 
 def run_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, min_samples_core=5, order=True):
     connected_components = []
     for cnn in nx.connected_components(nx.Graph(graphx)):
         if len(cnn) > min_cl:
-            print(len(cnn), end=", ")
             connected_components.append(nx.DiGraph(graphx.subgraph(cnn)))
     clusters = []
     roots = []
@@ -279,7 +285,7 @@ def run_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, min_samples_core=5, orde
         if len(G) < 100:
             clusters.append(G)
         else:
-            clusters_hdbscan, root_hdbscan = run_hdbscan(G, cl_size=cl_size, order=order, min_samples_core=min_samples_core)
+            clusters_hdbscan, root_hdbscan, _ = run_hdbscan(G, cl_size=cl_size, order=order, min_samples_core=min_samples_core)
             roots.append(root_hdbscan)
             clusters.extend(clusters_hdbscan)
 
@@ -303,7 +309,6 @@ def run_vanilla_hdbscan_on_brick(graphx, min_cl=40, cl_size=40, min_samples_core
     connected_components = []
     for cnn in nx.connected_components(nx.Graph(graphx)):
         if len(cnn) > min_cl:
-            print(len(cnn), end=", ")
             connected_components.append(nx.DiGraph(graphx.subgraph(cnn)))
     clusters = []
     roots = []

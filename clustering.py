@@ -118,12 +118,11 @@ def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, add_n
     if not baseline:
         _, weights = predict_one_shower(shower, graph_embedder=graph_embedder, edge_classifier=edge_classifier)
         weights = weights.detach().cpu().numpy()
-        weights =  -np.log((1 - weights) / (weights))
+        weights = -np.log((1 - weights) / weights)
         edge_index = shower.edge_index.t().detach().cpu().numpy()
         # weights = np.percentile(weights, q=90)
         edge_index = edge_index[weights > threshold]
-        weights = weights[weights > threshold]
-        print("Len weights", len(weights))
+        weights = -weights[weights > threshold]
     else:
         weights = shower.edge_attr.view(-1).detach().cpu().numpy()
         edge_index = shower.edge_index.t().detach().cpu().numpy()
@@ -131,7 +130,6 @@ def preprocess_torch_shower_to_nx(shower, graph_embedder, edge_classifier, add_n
         edge_index = edge_index[weights < threshold]
         weights = weights[weights < threshold]
         weights = np.random.randn(len(weights)) * np.std(weights) * add_noise + weights
-        print("Len weights", len(weights))
 
     for k, (p0, p1) in enumerate(edge_index):
         edges_to_add.append((p0, p1, weights[k]))
@@ -178,7 +176,6 @@ def calc_clustering_metrics(clusterized_bricks, experiment):
             shower_data['clusters'] = []
 
         for cluster in clusters:
-            print(class_disbalance_graphx(cluster))
             selected_tracks += len(cluster)
             for label, label_count in class_disbalance_graphx(cluster):
                 if label_count / showers_data[label]['numtracks'] >= 0.1:
@@ -348,7 +345,8 @@ def main(
         graph_embedder_weights='GraphNN_KNN_v1', 
         edge_classifier_weights='EdgeClassifier_v1'
 ):
-    experiment = Experiment(project_name=project_name, workspace=workspace) #, offline_directory="/home/vbelavin/comet_ml_offline")
+    experiment = Experiment(project_name=project_name, workspace=workspace)
+    #, offline_directory="/home/vbelavin/comet_ml_offline")
     device = torch.device('cpu')
     showers = torch.load(datafile)
     input_dim = showers[0].x.shape[1]

@@ -24,7 +24,7 @@ BRICK_X_MAX = 103000. # 10.3 cm
 BRICK_Y_MIN = 0.
 BRICK_Y_MAX = 128000. # 12.8 cm
 SAFE_M = 3000.
-dZ = 205. # 0.0205 cm emulsion
+dZ = 205.  # 0.0205 cm emulsion
 DISTANCE = 1293.
 
 kwargs = {'bins': 100, 'alpha': 0.8, 'normed': True}
