@@ -110,6 +110,7 @@ def preprocess_dataset(datafile):
     for i in tqdm(range(len(showers))):
         orders = torch.tensor(create_mask(showers[i])).bool()
         showers[i].orders = orders
+        showers[i].y = showers[i].y - showers[i].y.min() # a dirty hack to keep showers in range from 1 to MAX_SHOWERS
         orders_preprocessed = []
         for order in orders:
             if order.sum():
